@@ -10,9 +10,9 @@ st.set_page_config(page_title="Stationery Shop", page_icon="✏️", layout="wid
 # (Replace with your real products, prices, and image URLs)
 # ------------------------------
 products = [
-    {"id": 1, "name": "Pencil", "price": 10, "image": "images/pencil.jpg"},
-    {"id": 2, "name": "Eraser", "price": 15, "image": "images/eraser.jpg"},
-    {"id": 3, "name": "Ruler", "price": 20, "image": "images/ruler.jpg"},
+    {"id": 1, "name": "Pencil", "price": 10, "image": "image/pencil.jpg.jpg"},
+    {"id": 2, "name": "Eraser", "price": 15, "image": "image/eraser.jpg.jpg"},
+    {"id": 3, "name": "Ruler", "price": 20, "image": "image/ruler.jpg.jpg"},
 ]
 
 # ------------------------------
