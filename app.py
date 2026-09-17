@@ -1,8 +1,6 @@
 import streamlit as st
-import sqlalchemy
-from sqlalchemy import text
+from supabase import create_client
 import hashlib
-from datetime import datetime
 
 # ------------------------------
 # Page Config
@@ -10,79 +8,14 @@ from datetime import datetime
 st.set_page_config(page_title="Stationery Shop", page_icon="✏️", layout="wide")
 
 # ------------------------------
-# Database Connection
-# (Connection string is stored in Streamlit Secrets as DB_URL)
+# Supabase Connection
+# (URL and key are stored in Streamlit Secrets)
 # ------------------------------
 @st.cache_resource
-def get_engine():
-    return sqlalchemy.create_engine(st.secrets["DB_URL"])
+def get_client():
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
-engine = get_engine()
-
-# ------------------------------
-# Database Setup (creates tables if they don't exist yet)
-# ------------------------------
-def init_db():
-    with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'customer'
-            )
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS products (
-                id SERIAL PRIMARY KEY,
-                name TEXT NOT NULL,
-                price NUMERIC NOT NULL,
-                stock INTEGER NOT NULL DEFAULT 0,
-                image_url TEXT
-            )
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS orders (
-                id SERIAL PRIMARY KEY,
-                username TEXT NOT NULL,
-                order_time TIMESTAMP DEFAULT NOW(),
-                total NUMERIC NOT NULL
-            )
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS order_items (
-                id SERIAL PRIMARY KEY,
-                order_id INTEGER REFERENCES orders(id),
-                product_name TEXT,
-                quantity INTEGER,
-                price NUMERIC
-            )
-        """))
-
-        # Seed default admin account if no users exist yet
-        result = conn.execute(text("SELECT COUNT(*) FROM users")).scalar()
-        if result == 0:
-            admin_pw = hashlib.sha256("1234".encode()).hexdigest()
-            conn.execute(
-                text("INSERT INTO users (username, password, role) VALUES (:u, :p, 'admin')"),
-                {"u": "admin", "p": admin_pw}
-            )
-
-        # Seed default products if none exist yet
-        result = conn.execute(text("SELECT COUNT(*) FROM products")).scalar()
-        if result == 0:
-            default_products = [
-                {"name": "Pencil", "price": 10, "stock": 50, "image_url": "image/pencil.jpg"},
-                {"name": "Eraser", "price": 15, "stock": 50, "image_url": "image/eraser.jpg"},
-                {"name": "Ruler", "price": 20, "stock": 50, "image_url": "image/ruler.jpg"},
-            ]
-            for p in default_products:
-                conn.execute(
-                    text("INSERT INTO products (name, price, stock, image_url) VALUES (:name, :price, :stock, :image_url)"),
-                    p
-                )
-
-init_db()
+sb = get_client()
 
 # ------------------------------
 # Helper Functions
@@ -91,14 +24,12 @@ def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
 def get_products():
-    with engine.connect() as conn:
-        rows = conn.execute(text("SELECT * FROM products ORDER BY id")).mappings().all()
-    return [dict(r) for r in rows]
+    res = sb.table("products").select("*").order("id").execute()
+    return res.data
 
 def get_user(username):
-    with engine.connect() as conn:
-        row = conn.execute(text("SELECT * FROM users WHERE username = :u"), {"u": username}).mappings().first()
-    return dict(row) if row else None
+    res = sb.table("users").select("*").eq("username", username).execute()
+    return res.data[0] if res.data else None
 
 # ------------------------------
 # Session State Setup
@@ -145,11 +76,11 @@ if st.session_state.user is None:
             elif get_user(new_username):
                 st.sidebar.error("Username already taken")
             else:
-                with engine.begin() as conn:
-                    conn.execute(
-                        text("INSERT INTO users (username, password, role) VALUES (:u, :p, 'customer')"),
-                        {"u": new_username, "p": hash_pw(new_password)}
-                    )
+                sb.table("users").insert({
+                    "username": new_username,
+                    "password": hash_pw(new_password),
+                    "role": "customer"
+                }).execute()
                 st.sidebar.success("Account created! Please log in.")
                 st.session_state.show_signup = False
                 st.rerun()
@@ -190,17 +121,15 @@ if st.session_state.user and st.session_state.user["role"] == "admin":
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.button("Save Changes", key=f"save_{p['id']}"):
-                        with engine.begin() as conn:
-                            conn.execute(
-                                text("UPDATE products SET name=:n, price=:pr, stock=:s, image_url=:i WHERE id=:id"),
-                                {"n": new_name, "pr": new_price, "s": new_stock, "i": new_image, "id": p["id"]}
-                            )
+                        sb.table("products").update({
+                            "name": new_name, "price": new_price,
+                            "stock": new_stock, "image_url": new_image
+                        }).eq("id", p["id"]).execute()
                         st.success("Updated!")
                         st.rerun()
                 with col2:
                     if st.button("Delete Product", key=f"del_{p['id']}"):
-                        with engine.begin() as conn:
-                            conn.execute(text("DELETE FROM products WHERE id=:id"), {"id": p["id"]})
+                        sb.table("products").delete().eq("id", p["id"]).execute()
                         st.success("Deleted!")
                         st.rerun()
 
@@ -216,26 +145,21 @@ if st.session_state.user and st.session_state.user["role"] == "admin":
                 if not add_name:
                     st.error("Please enter a product name")
                 else:
-                    with engine.begin() as conn:
-                        conn.execute(
-                            text("INSERT INTO products (name, price, stock, image_url) VALUES (:n, :p, :s, :i)"),
-                            {"n": add_name, "p": add_price, "s": add_stock, "i": add_image}
-                        )
+                    sb.table("products").insert({
+                        "name": add_name, "price": add_price,
+                        "stock": add_stock, "image_url": add_image
+                    }).execute()
                     st.success(f"Added {add_name}!")
                     st.rerun()
 
     with tab2:
         st.subheader("All Orders")
-        with engine.connect() as conn:
-            orders = conn.execute(text("SELECT * FROM orders ORDER BY order_time DESC")).mappings().all()
+        orders = sb.table("orders").select("*").order("order_time", desc=True).execute().data
         if not orders:
             st.info("No orders yet.")
         for o in orders:
             with st.expander(f"Order #{o['id']} — {o['username']} — ${o['total']} — {o['order_time']}"):
-                with engine.connect() as conn:
-                    items = conn.execute(
-                        text("SELECT * FROM order_items WHERE order_id = :oid"), {"oid": o["id"]}
-                    ).mappings().all()
+                items = sb.table("order_items").select("*").eq("order_id", o["id"]).execute().data
                 for item in items:
                     st.write(f"- {item['product_name']} x {item['quantity']} — ${item['price']}")
 
@@ -296,52 +220,51 @@ else:
                     st.rerun()
             with col2:
                 if st.button("Checkout"):
-                    with engine.begin() as conn:
-                        # check stock is still enough for every item
+                    # check stock is still enough for every item
+                    ok = True
+                    for item in st.session_state.cart:
+                        current = sb.table("products").select("stock").eq("id", item["id"]).execute().data
+                        if not current or current[0]["stock"] < item["qty"]:
+                            st.error(f"Not enough stock for {item['name']}")
+                            ok = False
+                            break
+
+                    if ok:
+                        order = sb.table("orders").insert({
+                            "username": st.session_state.user["username"],
+                            "total": total
+                        }).execute()
+                        order_id = order.data[0]["id"]
+
                         for item in st.session_state.cart:
-                            current_stock = conn.execute(
-                                text("SELECT stock FROM products WHERE id=:id"), {"id": item["id"]}
-                            ).scalar()
-                            if current_stock < item["qty"]:
-                                st.error(f"Not enough stock for {item['name']}")
-                                st.stop()
+                            sb.table("order_items").insert({
+                                "order_id": order_id,
+                                "product_name": item["name"],
+                                "quantity": item["qty"],
+                                "price": item["price"]
+                            }).execute()
 
-                        order_id = conn.execute(
-                            text("INSERT INTO orders (username, total) VALUES (:u, :t) RETURNING id"),
-                            {"u": st.session_state.user["username"], "t": total}
-                        ).scalar()
+                            current = sb.table("products").select("stock").eq("id", item["id"]).execute().data[0]["stock"]
+                            sb.table("products").update({
+                                "stock": current - item["qty"]
+                            }).eq("id", item["id"]).execute()
 
-                        for item in st.session_state.cart:
-                            conn.execute(
-                                text("INSERT INTO order_items (order_id, product_name, quantity, price) VALUES (:oid, :n, :q, :p)"),
-                                {"oid": order_id, "n": item["name"], "q": item["qty"], "p": item["price"]}
-                            )
-                            conn.execute(
-                                text("UPDATE products SET stock = stock - :q WHERE id=:id"),
-                                {"q": item["qty"], "id": item["id"]}
-                            )
-
-                    st.session_state.cart = []
-                    st.success("Order placed successfully!")
-                    st.rerun()
+                        st.session_state.cart = []
+                        st.success("Order placed successfully!")
+                        st.rerun()
 
     with tab2:
         st.subheader("My Order History")
         if not st.session_state.user:
             st.warning("Please log in to view your orders.")
         else:
-            with engine.connect() as conn:
-                orders = conn.execute(
-                    text("SELECT * FROM orders WHERE username = :u ORDER BY order_time DESC"),
-                    {"u": st.session_state.user["username"]}
-                ).mappings().all()
+            orders = sb.table("orders").select("*").eq(
+                "username", st.session_state.user["username"]
+            ).order("order_time", desc=True).execute().data
             if not orders:
                 st.info("You haven't placed any orders yet.")
             for o in orders:
                 with st.expander(f"Order #{o['id']} — ${o['total']} — {o['order_time']}"):
-                    with engine.connect() as conn:
-                        items = conn.execute(
-                            text("SELECT * FROM order_items WHERE order_id = :oid"), {"oid": o["id"]}
-                        ).mappings().all()
+                    items = sb.table("order_items").select("*").eq("order_id", o["id"]).execute().data
                     for item in items:
                         st.write(f"- {item['product_name']} x {item['quantity']} — ${item['price']}")
