@@ -71,6 +71,8 @@ if "show_signup" not in st.session_state:
     st.session_state.show_signup = False
 if "signup_success" not in st.session_state:
     st.session_state.signup_success = False
+if "order_success_msg" not in st.session_state:
+    st.session_state.order_success_msg = None
 
 # ------------------------------
 # Sidebar: Login / Signup / Logout
@@ -212,6 +214,10 @@ else:
     tab1, tab2 = st.tabs(["Shop", "My Orders"])
 
     with tab1:
+        if st.session_state.order_success_msg:
+            st.success(st.session_state.order_success_msg)
+            st.session_state.order_success_msg = None
+
         st.write("Welcome! Browse our products below:")
         products = get_products()
         cols = st.columns(3)
@@ -300,7 +306,10 @@ else:
                             cart_items_snapshot,
                             total
                         )
-                        st.success("Order placed successfully! A confirmation email has been sent.")
+                        st.session_state.order_success_msg = (
+                            f"✅ Order #{order_id} placed successfully! "
+                            f"A confirmation email has been sent to {st.session_state.user.get('email') or 'your email'}."
+                        )
                         st.rerun()
 
     with tab2:
