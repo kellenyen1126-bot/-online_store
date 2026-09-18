@@ -1,6 +1,7 @@
 import streamlit as st
 from supabase import create_client
 import hashlib
+import resend
 
 # ------------------------------
 # Page Config
@@ -16,6 +17,34 @@ def get_client():
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 sb = get_client()
+resend.api_key = st.secrets["RESEND_API_KEY"]
+
+# ------------------------------
+# Send order confirmation email
+# ------------------------------
+def send_order_email(to_email, username, order_id, items, total):
+    if not to_email:
+        return
+    lines = "".join(
+        f"<li>{item['name']} x {item['qty']} — NT${item['price'] * item['qty']}</li>"
+        for item in items
+    )
+    html = f"""
+    <h2>Thank you for your order, {username}!</h2>
+    <p>Your order #{order_id} has been placed successfully.</p>
+    <ul>{lines}</ul>
+    <p><strong>Total: NT${total}</strong></p>
+    <p>— Stationery Shop</p>
+    """
+    try:
+        resend.Emails.send({
+            "from": "Stationery Shop <onboarding@resend.dev>",
+            "to": [to_email],
+            "subject": f"Order Confirmation #{order_id}",
+            "html": html
+        })
+    except Exception as e:
+        st.warning(f"Order placed, but confirmation email could not be sent ({e})")
 
 # ------------------------------
 # Helper Functions
@@ -63,7 +92,11 @@ if st.session_state.user is None:
         if st.sidebar.button("Log In"):
             u = get_user(login_username)
             if u and u["password"] == hash_pw(login_password):
-                st.session_state.user = {"username": u["username"], "role": u["role"]}
+                st.session_state.user = {
+                    "username": u["username"],
+                    "role": u["role"],
+                    "email": u.get("email")
+                }
                 st.rerun()
             else:
                 st.sidebar.error("Incorrect username or password")
@@ -75,16 +108,18 @@ if st.session_state.user is None:
     else:
         st.sidebar.subheader("Sign Up (Customer)")
         new_username = st.sidebar.text_input("Choose a username", key="signup_user")
+        new_email = st.sidebar.text_input("Your email", key="signup_email")
         new_password = st.sidebar.text_input("Choose a password", type="password", key="signup_pw")
 
         if st.sidebar.button("Create Account"):
-            if not new_username or not new_password:
-                st.sidebar.error("Please fill in both fields")
+            if not new_username or not new_password or not new_email:
+                st.sidebar.error("Please fill in all fields")
             elif get_user(new_username):
                 st.sidebar.error("Username already taken")
             else:
                 sb.table("users").insert({
                     "username": new_username,
+                    "email": new_email,
                     "password": hash_pw(new_password),
                     "role": "customer"
                 }).execute()
@@ -237,6 +272,7 @@ else:
                             break
 
                     if ok:
+                        cart_items_snapshot = list(st.session_state.cart)
                         order = sb.table("orders").insert({
                             "username": st.session_state.user["username"],
                             "total": total
@@ -257,7 +293,14 @@ else:
                             }).eq("id", item["id"]).execute()
 
                         st.session_state.cart = []
-                        st.success("Order placed successfully!")
+                        send_order_email(
+                            st.session_state.user.get("email"),
+                            st.session_state.user["username"],
+                            order_id,
+                            cart_items_snapshot,
+                            total
+                        )
+                        st.success("Order placed successfully! A confirmation email has been sent.")
                         st.rerun()
 
     with tab2:
