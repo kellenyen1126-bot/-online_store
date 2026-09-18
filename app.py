@@ -40,6 +40,8 @@ if "cart" not in st.session_state:
     st.session_state.cart = []
 if "show_signup" not in st.session_state:
     st.session_state.show_signup = False
+if "signup_success" not in st.session_state:
+    st.session_state.signup_success = False
 
 # ------------------------------
 # Sidebar: Login / Signup / Logout
@@ -50,6 +52,11 @@ if st.session_state.user is None:
 
     if not st.session_state.show_signup:
         st.sidebar.subheader("Log In")
+
+        if st.session_state.signup_success:
+            st.sidebar.success("✅ Account created successfully! Please log in below.")
+            st.session_state.signup_success = False
+
         login_username = st.sidebar.text_input("Username", key="login_user")
         login_password = st.sidebar.text_input("Password", type="password", key="login_pw")
 
@@ -81,8 +88,8 @@ if st.session_state.user is None:
                     "password": hash_pw(new_password),
                     "role": "customer"
                 }).execute()
-                st.sidebar.success("Account created! Please log in.")
                 st.session_state.show_signup = False
+                st.session_state.signup_success = True
                 st.rerun()
 
         if st.sidebar.button("Back to login"):
@@ -112,7 +119,7 @@ if st.session_state.user and st.session_state.user["role"] == "admin":
         st.subheader("Current Products")
         products = get_products()
         for p in products:
-            with st.expander(f"{p['name']} — ${p['price']} — Stock: {p['stock']}"):
+            with st.expander(f"{p['name']} — NT${p['price']} — Stock: {p['stock']}"):
                 new_name = st.text_input("Name", value=p["name"], key=f"name_{p['id']}")
                 new_price = st.number_input("Price", value=float(p["price"]), key=f"price_{p['id']}")
                 new_stock = st.number_input("Stock", value=int(p["stock"]), step=1, key=f"stock_{p['id']}")
@@ -158,10 +165,10 @@ if st.session_state.user and st.session_state.user["role"] == "admin":
         if not orders:
             st.info("No orders yet.")
         for o in orders:
-            with st.expander(f"Order #{o['id']} — {o['username']} — ${o['total']} — {o['order_time']}"):
+            with st.expander(f"Order #{o['id']} — {o['username']} — NT${o['total']} — {o['order_time']}"):
                 items = sb.table("order_items").select("*").eq("order_id", o["id"]).execute().data
                 for item in items:
-                    st.write(f"- {item['product_name']} x {item['quantity']} — ${item['price']}")
+                    st.write(f"- {item['product_name']} x {item['quantity']} — NT${item['price']}")
 
 # ==============================
 # CUSTOMER / GUEST VIEW
@@ -179,7 +186,7 @@ else:
                 if p["image_url"]:
                     st.image(p["image_url"], width=150)
                 st.subheader(p["name"])
-                st.write(f"Price: ${p['price']}")
+                st.write(f"Price: NT${p['price']}")
                 st.write(f"In stock: {p['stock']}")
 
                 if st.session_state.user:
@@ -208,10 +215,10 @@ else:
         else:
             total = 0
             for i, item in enumerate(st.session_state.cart):
-                st.write(f"- {item['name']} x {item['qty']} — ${item['price'] * item['qty']}")
+                st.write(f"- {item['name']} x {item['qty']} — NT${item['price'] * item['qty']}")
                 total += item['price'] * item['qty']
 
-            st.write(f"**Total: ${total}**")
+            st.write(f"**Total: NT${total}**")
 
             col1, col2 = st.columns(2)
             with col1:
@@ -264,7 +271,7 @@ else:
             if not orders:
                 st.info("You haven't placed any orders yet.")
             for o in orders:
-                with st.expander(f"Order #{o['id']} — ${o['total']} — {o['order_time']}"):
+                with st.expander(f"Order #{o['id']} — NT${o['total']} — {o['order_time']}"):
                     items = sb.table("order_items").select("*").eq("order_id", o["id"]).execute().data
                     for item in items:
-                        st.write(f"- {item['product_name']} x {item['quantity']} — ${item['price']}")
+                        st.write(f"- {item['product_name']} x {item['quantity']} — NT${item['price']}")
